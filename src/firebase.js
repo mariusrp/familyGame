@@ -9,7 +9,6 @@ const firebaseConfig = {
   messagingSenderId: "830277933538",
   appId: "1:830277933538:web:9856d7d47ce3e41f5dc1bb",
   measurementId: "G-55L2SV349R",
-  // VIKTIG: Du mangler databaseURL! Legg til denne:
   databaseURL:
     "https://game-700aa-default-rtdb.europe-west1.firebasedatabase.app/",
 };
