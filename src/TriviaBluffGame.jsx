@@ -70,7 +70,7 @@ export default function TriviaBluffGame() {
 
   const createGame = async () => {
     if (!playerName.trim()) {
-      alert("Please enter your name first");
+      alert("Skriv inn navnet ditt først");
       return;
     }
 
@@ -94,7 +94,7 @@ export default function TriviaBluffGame() {
 
   const joinGame = async () => {
     if (!playerName.trim() || !joinCode.trim()) {
-      alert("Please enter your name and game code");
+      alert("Skriv inn navn og spillkode");
       return;
     }
 
@@ -107,7 +107,7 @@ export default function TriviaBluffGame() {
       });
 
       if (!snapshot.val()) {
-        alert("Game not found! Please check the game code.");
+        alert("Spill ikke funnet! Sjekk spillkoden.");
         return;
       }
 
@@ -124,7 +124,7 @@ export default function TriviaBluffGame() {
       setIsHost(false);
       setGameState("lobby");
     } catch (error) {
-      alert("Could not join the game. Please check the game code!");
+      alert("Kunne ikke joine spillet. Sjekk spillkoden!");
     }
   };
 
@@ -145,7 +145,7 @@ export default function TriviaBluffGame() {
 
   const submitAnswer = async () => {
     if (!playerAnswer.trim()) {
-      alert("Please enter an answer");
+      alert("Skriv inn et svar");
       return;
     }
 
@@ -153,7 +153,7 @@ export default function TriviaBluffGame() {
       gameData?.correctAnswer &&
       playerAnswer.toLowerCase().trim() === gameData.correctAnswer.toLowerCase()
     ) {
-      alert("That's the correct answer! Try to create a decoy answer instead.");
+      alert("Det er det riktige svaret! Prøv å lage et luresvar i stedet.");
       return;
     }
 
@@ -168,7 +168,7 @@ export default function TriviaBluffGame() {
 
   const submitVote = async () => {
     if (!selectedAnswer) {
-      alert("Please select an answer");
+      alert("Velg et svar");
       return;
     }
 
@@ -243,7 +243,7 @@ export default function TriviaBluffGame() {
     return (
       <div className="progress-indicators">
         <h4 className="progress-title">
-          {isAnswerPhase ? "Answer Progress" : "Voting Progress"}
+          {isAnswerPhase ? "Svar-fremdrift" : "Stemme-fremdrift"}
         </h4>
         <div className="player-progress-list">
           {playerList.map((player) => {
@@ -270,6 +270,20 @@ export default function TriviaBluffGame() {
     );
   };
 
+  // Helper function to get voters for each answer
+  const getVotersForAnswer = (answer, votes) => {
+    return Object.entries(votes || {})
+      .filter(([voter, vote]) => vote === answer)
+      .map(([voter]) => voter);
+  };
+
+  // Game code display component for all phases except menu and lobby
+  const GameCodeDisplay = () => {
+    if (gameState === "menu" || gameState === "lobby") return null;
+
+    return <div className="floating-game-code">Spillkode: {gameCode}</div>;
+  };
+
   if (gameState === "menu") {
     return (
       <div className="game-container">
@@ -278,26 +292,26 @@ export default function TriviaBluffGame() {
 
           <input
             type="text"
-            placeholder="Enter your name"
+            placeholder="Skriv inn navnet ditt"
             value={playerName}
             onChange={(e) => setPlayerName(e.target.value)}
             className="input-field"
           />
 
           <button onClick={createGame} className="btn btn-primary mb-4">
-            Create Game
+            Lag Spill
           </button>
 
           <div className="join-section">
             <input
               type="text"
-              placeholder="Game Code"
+              placeholder="Spillkode"
               value={joinCode}
               onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
               className="input-field join-input"
             />
             <button onClick={joinGame} className="btn btn-secondary">
-              Join Game
+              Bli Med
             </button>
           </div>
         </div>
@@ -311,17 +325,17 @@ export default function TriviaBluffGame() {
     return (
       <div className="game-container">
         <div className="game-card">
-          <h2 className="section-title">Game Lobby</h2>
+          <h2 className="section-title">Spillrom</h2>
           <div className="game-code-display">
-            <p className="code-label">Game Code</p>
+            <p className="code-label">Spillkode</p>
             <p className="game-code">{gameCode}</p>
           </div>
 
           <div className="players-section">
-            <h3 className="players-title">Players ({players.length})</h3>
+            <h3 className="players-title">Spillere ({players.length})</h3>
             {players.map((player) => (
               <div key={player.name} className="player-item">
-                {player.name} {player.name === gameData?.host ? "(Host)" : ""}
+                {player.name} {player.name === gameData?.host ? "(Vert)" : ""}
               </div>
             ))}
           </div>
@@ -334,13 +348,13 @@ export default function TriviaBluffGame() {
                 players.length >= 2 ? "btn-success" : "btn-disabled"
               }`}
             >
-              {players.length >= 2 ? "Start Game" : "Need at least 2 players"}
+              {players.length >= 2 ? "Start Spill" : "Trenger minst 2 spillere"}
             </button>
           )}
 
           {!isHost && (
             <p className="waiting-text">
-              Waiting for host to start the game...
+              Venter på at verten starter spillet...
             </p>
           )}
         </div>
@@ -359,9 +373,10 @@ export default function TriviaBluffGame() {
 
     return (
       <div className="game-container">
+        <GameCodeDisplay />
         <div className="game-card extra-wide">
           <div className="question-header">
-            <h3 className="round-number">Round {gameData?.round}</h3>
+            <h3 className="round-number">Runde {gameData?.round}</h3>
             <h2 className="question-text">{gameData?.currentQuestion}</h2>
           </div>
 
@@ -376,30 +391,30 @@ export default function TriviaBluffGame() {
             <>
               <div className="answer-section">
                 <p className="instruction-text">
-                  Create a convincing decoy answer that might fool other players
+                  Lag et overbevisende luresvar som kan lure andre spillere
                 </p>
                 <input
                   type="text"
                   value={playerAnswer}
                   onChange={(e) => setPlayerAnswer(e.target.value)}
                   className="input-field"
-                  placeholder="Enter your decoy answer..."
+                  placeholder="Skriv ditt luresvar her..."
                 />
               </div>
 
               <button onClick={submitAnswer} className="btn btn-warning">
-                Submit Answer
+                Send Inn Svar
               </button>
             </>
           ) : (
             <div className="status-display">
-              <h3 className="status-title">Answer Submitted</h3>
+              <h3 className="status-title">Svar Sendt Inn</h3>
               <p className="status-text">
-                Waiting for other players to submit their answers...
+                Venter på at andre spillere sender inn sine svar...
               </p>
               {isHost && allAnswered && (
                 <button onClick={proceedToVoting} className="btn btn-success">
-                  Start Voting Phase
+                  Start Stemmefase
                 </button>
               )}
             </div>
@@ -416,18 +431,12 @@ export default function TriviaBluffGame() {
       () => Math.random() - 0.5
     );
 
-    const votedCount = gameData?.votes ? Object.keys(gameData.votes).length : 0;
-    const totalPlayers = gameData?.players
-      ? Object.keys(gameData.players).length
-      : 0;
-
     return (
       <div className="game-container">
+        <GameCodeDisplay />
         <div className="game-card extra-wide">
           <h2 className="question-text">{gameData?.currentQuestion}</h2>
-          <p className="instruction-text">
-            Select the answer you believe is correct
-          </p>
+          <p className="instruction-text">Velg svaret du tror er riktig</p>
 
           {renderProgressIndicators(
             gameData?.phase,
@@ -459,17 +468,17 @@ export default function TriviaBluffGame() {
                   selectedAnswer ? "btn-success" : "btn-disabled"
                 }`}
               >
-                Submit Vote
+                Stem
               </button>
             </>
           ) : (
             <div className="status-display">
-              <h3 className="status-title">Vote Submitted</h3>
+              <h3 className="status-title">Stemme Avgitt</h3>
               <p className="status-text">
-                Waiting for other players to vote...
+                Venter på at andre spillere stemmer...
               </p>
               <p className="status-text">
-                Results will be shown automatically when everyone has voted.
+                Resultater vises automatisk når alle har stemt.
               </p>
             </div>
           )}
@@ -485,47 +494,44 @@ export default function TriviaBluffGame() {
     const myVote = gameData?.votes?.[playerName];
     const votes = gameData?.votes || {};
 
-    // Count votes for each answer
-    const voteCount = {};
-    Object.values(votes).forEach((vote) => {
-      voteCount[vote] = (voteCount[vote] || 0) + 1;
-    });
-
     return (
       <div className="game-container">
+        <GameCodeDisplay />
         <div className="game-card extra-wide">
-          <h2 className="section-title">Round Results</h2>
+          <h2 className="section-title">Resultater</h2>
           <h3 className="question-text">{gameData?.currentQuestion}</h3>
 
           <div className="results-list">
             {allAnswers.map((answer, i) => {
-              const votes = voteCount[answer.answer] || 0;
-              const votePlural = votes === 1 ? "vote" : "votes";
+              const voters = getVotersForAnswer(answer.answer, votes);
+              const isCorrect = answer.isCorrect;
+              const wasMyVote = myVote === answer.answer;
 
               return (
                 <div
                   key={i}
                   className={`result-item ${
-                    answer.isCorrect
-                      ? "correct"
-                      : myVote === answer.answer
-                      ? "my-vote"
-                      : ""
-                  }`}
+                    isCorrect ? "correct-answer" : "wrong-answer"
+                  } ${wasMyVote ? "my-vote" : ""}`}
                 >
                   <div className="result-content">
-                    <span className="result-answer">{answer.answer}</span>
-                    <span className="result-label">
-                      {answer.isCorrect
-                        ? `Correct Answer • ${votes} ${votePlural}`
-                        : `by ${answer.player} • ${votes} ${votePlural}`}
-                    </span>
+                    <div className="result-main">
+                      <span className="result-answer">{answer.answer}</span>
+                      <span className="result-author">
+                        {isCorrect ? "Riktig svar" : `av ${answer.player}`}
+                      </span>
+                    </div>
+                    {voters.length > 0 && (
+                      <div className="result-voters">
+                        Stemt av: {voters.join(", ")}
+                      </div>
+                    )}
                   </div>
-                  {myVote === answer.answer && (
+                  {wasMyVote && (
                     <div className="vote-indicator">
-                      {answer.isCorrect
-                        ? "You got it right! +2 points"
-                        : "You were fooled by this decoy answer"}
+                      {isCorrect
+                        ? "Du hadde rett! +2 poeng"
+                        : "Du ble lurt av dette luresvaret"}
                     </div>
                   )}
                 </div>
@@ -535,13 +541,13 @@ export default function TriviaBluffGame() {
 
           {isHost && (
             <button onClick={proceedToRankings} className="btn btn-success">
-              Show Scoreboard
+              Vis Poengtavle
             </button>
           )}
 
           {!isHost && (
             <div className="calculating">
-              <p>Waiting for host to continue...</p>
+              <p>Venter på at verten fortsetter...</p>
             </div>
           )}
         </div>
@@ -555,9 +561,10 @@ export default function TriviaBluffGame() {
 
     return (
       <div className="game-container">
+        <GameCodeDisplay />
         <div className="game-card">
-          <h2 className="section-title">Scoreboard</h2>
-          <p className="round-info">After {gameData?.round} round(s)</p>
+          <h2 className="section-title">Poengtavle</h2>
+          <p className="round-info">Etter {gameData?.round} runde(r)</p>
 
           <div className="rankings-list">
             {sortedPlayers.map((player, i) => (
@@ -568,7 +575,7 @@ export default function TriviaBluffGame() {
                 <div className="ranking-info">
                   <span className="rank">#{i + 1}</span>
                   <span className="player-name">
-                    {player.name} {i === 0 ? "(Leader)" : ""}
+                    {player.name} {i === 0 ? "(Leder)" : ""}
                   </span>
                 </div>
                 <span className="score">{player.score}</span>
@@ -578,13 +585,13 @@ export default function TriviaBluffGame() {
 
           {isHost && (
             <button onClick={nextRound} className="btn btn-success">
-              Next Round
+              Neste Runde
             </button>
           )}
 
           {!isHost && (
             <p className="waiting-text">
-              Waiting for host to start next round...
+              Venter på at verten starter neste runde...
             </p>
           )}
         </div>

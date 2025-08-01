@@ -6,7 +6,6 @@ function App() {
   return (
     <div className="App">
       <TriviaBluffGame />
-      <h1>hello</h1>
     </div>
   );
 }
