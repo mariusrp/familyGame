@@ -2,12 +2,13 @@ import { useState, useEffect } from "react";
 import { database } from "./firebase";
 import { ref, set, onValue, off, update } from "firebase/database";
 import "./TriviaBluffGame.css";
-import { correctAnswers, questions } from "./gameData";
+import { correctAnswers, questions, playerEmojis } from "./gameData";
 
 export default function TriviaBluffGame() {
   const [gameState, setGameState] = useState("menu");
   const [gameCode, setGameCode] = useState("");
   const [playerName, setPlayerName] = useState("");
+  const [selectedEmoji, setSelectedEmoji] = useState("");
   const [gameData, setGameData] = useState(null);
   const [playerAnswer, setPlayerAnswer] = useState("");
   const [selectedAnswer, setSelectedAnswer] = useState("");
@@ -15,6 +16,9 @@ export default function TriviaBluffGame() {
   const [joinCode, setJoinCode] = useState("");
   const [hasAnswered, setHasAnswered] = useState(false);
   const [hasVoted, setHasVoted] = useState(false);
+  // New state for question preview
+  const [previewQuestion, setPreviewQuestion] = useState(null);
+  const [previewIndex, setPreviewIndex] = useState(null);
 
   // Listen to game changes
   useEffect(() => {
@@ -32,6 +36,8 @@ export default function TriviaBluffGame() {
         else if (data.phase === "voting") setGameState("voting");
         else if (data.phase === "results") setGameState("results");
         else if (data.phase === "rankings") setGameState("rankings");
+        else if (data.phase === "questionPreview")
+          setGameState("questionPreview");
       }
     });
 
@@ -74,6 +80,11 @@ export default function TriviaBluffGame() {
       return;
     }
 
+    if (!selectedEmoji) {
+      alert("Velg en emoji først");
+      return;
+    }
+
     const code = generateGameCode();
     const gameRef = ref(database, `games/${code}`);
 
@@ -81,7 +92,7 @@ export default function TriviaBluffGame() {
       host: playerName,
       phase: "lobby",
       players: {
-        [playerName]: { name: playerName, score: 0 },
+        [playerName]: { name: playerName, emoji: selectedEmoji, score: 0 },
       },
       round: 1,
       created: Date.now(),
@@ -95,6 +106,11 @@ export default function TriviaBluffGame() {
   const joinGame = async () => {
     if (!playerName.trim() || !joinCode.trim()) {
       alert("Skriv inn navn og spillkode");
+      return;
+    }
+
+    if (!selectedEmoji) {
+      alert("Velg en emoji først");
       return;
     }
 
@@ -117,6 +133,7 @@ export default function TriviaBluffGame() {
       );
       await set(playerRef, {
         name: playerName,
+        emoji: selectedEmoji,
         score: 0,
       });
 
@@ -128,16 +145,38 @@ export default function TriviaBluffGame() {
     }
   };
 
+  // Modified startRound function to show question preview first
   const startRound = async () => {
     if (!isHost) return;
 
+    // Generate a random question for preview
     const questionIndex = Math.floor(Math.random() * questions.length);
-    const gameRef = ref(database, `games/${gameCode}`);
+    setPreviewIndex(questionIndex);
+    setPreviewQuestion(questions[questionIndex]);
 
+    // Set phase to questionPreview so only host sees it
+    const gameRef = ref(database, `games/${gameCode}`);
+    await update(gameRef, {
+      phase: "questionPreview",
+    });
+  };
+
+  // New function to skip current question and get a new one
+  const skipQuestion = () => {
+    const newQuestionIndex = Math.floor(Math.random() * questions.length);
+    setPreviewIndex(newQuestionIndex);
+    setPreviewQuestion(questions[newQuestionIndex]);
+  };
+
+  // New function to confirm question and start the round
+  const confirmQuestion = async () => {
+    if (!isHost || previewIndex === null) return;
+
+    const gameRef = ref(database, `games/${gameCode}`);
     await update(gameRef, {
       phase: "question",
-      currentQuestion: questions[questionIndex],
-      correctAnswer: correctAnswers[questionIndex],
+      currentQuestion: questions[previewIndex],
+      correctAnswer: correctAnswers[previewIndex],
       answers: {},
       votes: {},
     });
@@ -204,15 +243,19 @@ export default function TriviaBluffGame() {
   const nextRound = async () => {
     if (!isHost) return;
 
+    // Reset preview states
+    setPreviewQuestion(null);
+    setPreviewIndex(null);
+
+    // Generate a random question for preview
     const questionIndex = Math.floor(Math.random() * questions.length);
+    setPreviewIndex(questionIndex);
+    setPreviewQuestion(questions[questionIndex]);
+
     const gameRef = ref(database, `games/${gameCode}`);
     await update(gameRef, {
       round: (gameData?.round || 1) + 1,
-      phase: "question",
-      currentQuestion: questions[questionIndex],
-      correctAnswer: correctAnswers[questionIndex],
-      answers: {},
-      votes: {},
+      phase: "questionPreview", // Start with preview phase
     });
   };
 
@@ -250,6 +293,7 @@ export default function TriviaBluffGame() {
             const isCompleted = completedPlayers.includes(player.name);
             return (
               <div key={player.name} className="player-progress-item">
+                <span className="player-progress-emoji">{player.emoji}</span>
                 <div
                   className={`progress-checkbox ${
                     isCompleted ? "completed" : ""
@@ -298,6 +342,23 @@ export default function TriviaBluffGame() {
             className="input-field"
           />
 
+          <div className="emoji-selection">
+            <p className="emoji-title">Velg din emoji</p>
+            <div className="emoji-grid">
+              {playerEmojis.map((emoji, i) => (
+                <button
+                  key={i}
+                  onClick={() => setSelectedEmoji(emoji)}
+                  className={`emoji-option ${
+                    selectedEmoji === emoji ? "selected" : ""
+                  }`}
+                >
+                  {emoji}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <button onClick={createGame} className="btn btn-primary mb-4">
             Lag Spill
           </button>
@@ -335,7 +396,10 @@ export default function TriviaBluffGame() {
             <h3 className="players-title">Spillere ({players.length})</h3>
             {players.map((player) => (
               <div key={player.name} className="player-item">
-                {player.name} {player.name === gameData?.host ? "(Vert)" : ""}
+                <span className="player-emoji">{player.emoji}</span>
+                <span>
+                  {player.name} {player.name === gameData?.host ? "(Vert)" : ""}
+                </span>
               </div>
             ))}
           </div>
@@ -357,6 +421,61 @@ export default function TriviaBluffGame() {
               Venter på at verten starter spillet...
             </p>
           )}
+        </div>
+      </div>
+    );
+  }
+
+  // New question preview state - only visible to host
+  if (gameState === "questionPreview") {
+    if (!isHost) {
+      // Non-host players see a waiting screen
+      return (
+        <div className="game-container">
+          <GameCodeDisplay />
+          <div className="game-card">
+            <h2 className="section-title">Forbereder spørsmål</h2>
+            <p className="waiting-text">
+              Verten velger spørsmål for denne runden...
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    // Host sees the question preview
+    return (
+      <div className="game-container">
+        <GameCodeDisplay />
+        <div className="game-card extra-wide">
+          <h2 className="section-title">Forhåndsvisning av spørsmål</h2>
+          <h3 className="round-number">Runde {gameData?.round}</h3>
+
+          <div className="question-preview">
+            <div className="preview-question">
+              <h3 className="question-text">{previewQuestion}</h3>
+            </div>
+
+            <div className="preview-answer">
+              <p className="answer-label">Riktig svar:</p>
+              <p className="correct-answer-preview">
+                {correctAnswers[previewIndex]}
+              </p>
+            </div>
+          </div>
+
+          <div className="preview-actions">
+            <button onClick={skipQuestion} className="btn btn-warning">
+              Hopp over dette spørsmålet
+            </button>
+            <button onClick={confirmQuestion} className="btn btn-success">
+              Bruk dette spørsmålet
+            </button>
+          </div>
+
+          <p className="preview-instruction">
+            Velg om du vil bruke dette spørsmålet eller hoppe over til et nytt.
+          </p>
         </div>
       </div>
     );
@@ -573,6 +692,7 @@ export default function TriviaBluffGame() {
                 className={`ranking-item ${i === 0 ? "winner" : ""}`}
               >
                 <div className="ranking-info">
+                  <span className="ranking-emoji">{player.emoji}</span>
                   <span className="rank">#{i + 1}</span>
                   <span className="player-name">
                     {player.name} {i === 0 ? "(Leder)" : ""}
