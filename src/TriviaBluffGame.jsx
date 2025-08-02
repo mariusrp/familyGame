@@ -16,9 +16,24 @@ export default function TriviaBluffGame() {
   const [joinCode, setJoinCode] = useState("");
   const [hasAnswered, setHasAnswered] = useState(false);
   const [hasVoted, setHasVoted] = useState(false);
-  // New state for question preview
   const [previewQuestion, setPreviewQuestion] = useState(null);
   const [previewIndex, setPreviewIndex] = useState(null);
+
+  // New state for guess settings
+  const [maxGuesses, setMaxGuesses] = useState(3);
+  const [currentGuessCount, setCurrentGuessCount] = useState(0);
+
+  // New state for manual scoring
+  const [showManualScoring, setShowManualScoring] = useState(false);
+
+  // Helper functions (defined early so they can be used in useEffect)
+  const getPlayersWhoAnswered = (answers) => {
+    const players = new Set();
+    Object.values(answers).forEach((answerData) => {
+      players.add(answerData.player);
+    });
+    return Array.from(players);
+  };
 
   // Listen to game changes
   useEffect(() => {
@@ -38,6 +53,7 @@ export default function TriviaBluffGame() {
         else if (data.phase === "rankings") setGameState("rankings");
         else if (data.phase === "questionPreview")
           setGameState("questionPreview");
+        else if (data.phase === "manualScoring") setGameState("manualScoring");
       }
     });
 
@@ -51,24 +67,33 @@ export default function TriviaBluffGame() {
       setHasVoted(false);
       setPlayerAnswer("");
       setSelectedAnswer("");
+      setCurrentGuessCount(0);
     }
   }, [gameData?.phase, gameData?.currentQuestion]);
 
-  // Auto-advance to results after voting (and calculate scores)
+  // Auto-advance to voting when all players have answered
   useEffect(() => {
-    if (!isHost || !gameData || gameData.phase !== "voting") return;
+    if (!isHost || !gameData || gameData.phase !== "question") return;
 
     const totalPlayers = Object.keys(gameData.players || {}).length;
-    const votedPlayers = Object.keys(gameData.votes || {}).length;
+    const playersWhoAnswered = gameData.answers
+      ? getPlayersWhoAnswered(gameData.answers)
+      : [];
 
-    if (totalPlayers > 0 && votedPlayers === totalPlayers) {
+    if (totalPlayers > 0 && playersWhoAnswered.length === totalPlayers) {
       setTimeout(async () => {
-        await calculateScores();
         const gameRef = ref(database, `games/${gameCode}`);
-        await update(gameRef, { phase: "results" });
-      }, 2000);
+        await update(gameRef, { phase: "voting" });
+      }, 1000);
     }
-  }, [gameData?.votes, gameData?.players, gameData?.phase, isHost, gameCode]);
+  }, [
+    gameData?.answers,
+    gameData?.players,
+    gameData?.phase,
+    isHost,
+    gameCode,
+    getPlayersWhoAnswered,
+  ]);
 
   const generateGameCode = () => {
     return Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -79,7 +104,6 @@ export default function TriviaBluffGame() {
       alert("Skriv inn navnet ditt først");
       return;
     }
-
     if (!selectedEmoji) {
       alert("Velg en emoji først");
       return;
@@ -96,6 +120,7 @@ export default function TriviaBluffGame() {
       },
       round: 1,
       created: Date.now(),
+      maxGuesses: maxGuesses, // Store max guesses setting
     });
 
     setGameCode(code);
@@ -108,7 +133,6 @@ export default function TriviaBluffGame() {
       alert("Skriv inn navn og spillkode");
       return;
     }
-
     if (!selectedEmoji) {
       alert("Velg en emoji først");
       return;
@@ -145,30 +169,25 @@ export default function TriviaBluffGame() {
     }
   };
 
-  // Modified startRound function to show question preview first
   const startRound = async () => {
     if (!isHost) return;
 
-    // Generate a random question for preview
     const questionIndex = Math.floor(Math.random() * questions.length);
     setPreviewIndex(questionIndex);
     setPreviewQuestion(questions[questionIndex]);
 
-    // Set phase to questionPreview so only host sees it
     const gameRef = ref(database, `games/${gameCode}`);
     await update(gameRef, {
       phase: "questionPreview",
     });
   };
 
-  // New function to skip current question and get a new one
   const skipQuestion = () => {
     const newQuestionIndex = Math.floor(Math.random() * questions.length);
     setPreviewIndex(newQuestionIndex);
     setPreviewQuestion(questions[newQuestionIndex]);
   };
 
-  // New function to confirm question and start the round
   const confirmQuestion = async () => {
     if (!isHost || previewIndex === null) return;
 
@@ -179,6 +198,7 @@ export default function TriviaBluffGame() {
       correctAnswer: correctAnswers[previewIndex],
       answers: {},
       votes: {},
+      playerGuessCount: {}, // Track guesses per player
     });
   };
 
@@ -196,13 +216,38 @@ export default function TriviaBluffGame() {
       return;
     }
 
-    const answerRef = ref(database, `games/${gameCode}/answers/${playerName}`);
+    // Check if player has reached max guesses
+    const playerGuesses = gameData?.playerGuessCount?.[playerName] || 0;
+    if (playerGuesses >= gameData?.maxGuesses) {
+      alert(`Du har brukt opp alle dine ${gameData.maxGuesses} forsøk!`);
+      return;
+    }
+
+    // Create unique answer key for each attempt
+    const answerKey = `${playerName}_${playerGuesses + 1}`;
+    const answerRef = ref(database, `games/${gameCode}/answers/${answerKey}`);
     await set(answerRef, {
       answer: playerAnswer,
       player: playerName,
+      attemptNumber: playerGuesses + 1,
     });
 
-    setHasAnswered(true);
+    // Update guess count
+    const guessCountRef = ref(
+      database,
+      `games/${gameCode}/playerGuessCount/${playerName}`
+    );
+    const newGuessCount = playerGuesses + 1;
+    await set(guessCountRef, newGuessCount);
+    setCurrentGuessCount(newGuessCount);
+
+    // Clear the input field for next attempt
+    setPlayerAnswer("");
+
+    // Set hasAnswered to true if this was the final guess
+    if (newGuessCount >= gameData?.maxGuesses) {
+      setHasAnswered(true);
+    }
   };
 
   const submitVote = async () => {
@@ -220,6 +265,8 @@ export default function TriviaBluffGame() {
   const calculateScores = async () => {
     if (!gameData || !isHost) return;
 
+    console.log("Calculating scores...", gameData); // Debug log
+
     const newScores = { ...gameData.players };
     const votes = gameData.votes || {};
     const answers = gameData.answers || {};
@@ -229,34 +276,63 @@ export default function TriviaBluffGame() {
         newScores[voter].score += 2;
       }
 
-      Object.entries(answers).forEach(([answerPlayer, answerData]) => {
-        if (answerData.answer === votedAnswer && answerPlayer !== voter) {
-          newScores[answerPlayer].score += 1;
+      Object.entries(answers).forEach(([answerKey, answerData]) => {
+        if (answerData.answer === votedAnswer && answerData.player !== voter) {
+          newScores[answerData.player].score += 1;
         }
       });
     });
 
     const gameRef = ref(database, `games/${gameCode}`);
     await update(gameRef, { players: newScores });
+    console.log("Scores updated!", newScores); // Debug log
+  };
+
+  const proceedToManualScoring = async () => {
+    if (!isHost) return;
+    const gameRef = ref(database, `games/${gameCode}`);
+    await update(gameRef, { phase: "manualScoring" });
+    setShowManualScoring(true);
+  };
+
+  const awardPointsToPlayer = async (playerName, points) => {
+    if (!isHost) return;
+
+    const newScores = { ...gameData.players };
+    newScores[playerName].score += points;
+
+    const gameRef = ref(database, `games/${gameCode}`);
+    await update(gameRef, { players: newScores });
+  };
+
+  const proceedToRankings = async () => {
+    if (!isHost) return;
+    const gameRef = ref(database, `games/${gameCode}`);
+    await update(gameRef, { phase: "rankings" });
+    setShowManualScoring(false);
   };
 
   const nextRound = async () => {
     if (!isHost) return;
+    console.log("Starting next round..."); // Debug log
 
-    // Reset preview states
-    setPreviewQuestion(null);
-    setPreviewIndex(null);
+    try {
+      setPreviewQuestion(null);
+      setPreviewIndex(null);
 
-    // Generate a random question for preview
-    const questionIndex = Math.floor(Math.random() * questions.length);
-    setPreviewIndex(questionIndex);
-    setPreviewQuestion(questions[questionIndex]);
+      const questionIndex = Math.floor(Math.random() * questions.length);
+      setPreviewIndex(questionIndex);
+      setPreviewQuestion(questions[questionIndex]);
 
-    const gameRef = ref(database, `games/${gameCode}`);
-    await update(gameRef, {
-      round: (gameData?.round || 1) + 1,
-      phase: "questionPreview", // Start with preview phase
-    });
+      const gameRef = ref(database, `games/${gameCode}`);
+      await update(gameRef, {
+        round: (gameData?.round || 1) + 1,
+        phase: "questionPreview",
+      });
+      console.log("Successfully started next round"); // Debug log
+    } catch (error) {
+      console.error("Error starting next round:", error);
+    }
   };
 
   const proceedToVoting = async () => {
@@ -265,13 +341,46 @@ export default function TriviaBluffGame() {
     await update(gameRef, { phase: "voting" });
   };
 
-  const proceedToRankings = async () => {
+  const proceedToResults = async () => {
     if (!isHost) return;
-    const gameRef = ref(database, `games/${gameCode}`);
-    await update(gameRef, { phase: "rankings" });
+    console.log("Proceeding to results..."); // Debug log
+    try {
+      await calculateScores();
+      const gameRef = ref(database, `games/${gameCode}`);
+      await update(gameRef, { phase: "results" });
+      console.log("Successfully moved to results phase"); // Debug log
+    } catch (error) {
+      console.error("Error proceeding to results:", error);
+    }
   };
 
-  // Helper function to render progress indicators
+  // Helper function to get unique answers (remove duplicates)
+  const getUniqueAnswers = (answers) => {
+    const uniqueAnswers = [];
+    const seenAnswers = new Set();
+
+    Object.values(answers).forEach((answerData) => {
+      const answerText = answerData.answer.toLowerCase().trim();
+      if (!seenAnswers.has(answerText)) {
+        seenAnswers.add(answerText);
+        uniqueAnswers.push(answerData);
+      }
+    });
+
+    return uniqueAnswers;
+  };
+
+  // Helper function to get all players who submitted the same answer
+  const getPlayersForAnswer = (targetAnswer, answers) => {
+    return Object.values(answers)
+      .filter(
+        (answerData) =>
+          answerData.answer.toLowerCase().trim() ===
+          targetAnswer.toLowerCase().trim()
+      )
+      .map((answerData) => answerData.player);
+  };
+
   const renderProgressIndicators = (currentPhase, players, answers, votes) => {
     const playerList = Object.values(players || {});
     const isAnswerPhase = currentPhase === "question";
@@ -280,7 +389,7 @@ export default function TriviaBluffGame() {
     if (!isAnswerPhase && !isVotingPhase) return null;
 
     const completedPlayers = isAnswerPhase
-      ? Object.keys(answers || {})
+      ? getPlayersWhoAnswered(answers || {})
       : Object.keys(votes || {});
 
     return (
@@ -314,17 +423,14 @@ export default function TriviaBluffGame() {
     );
   };
 
-  // Helper function to get voters for each answer
   const getVotersForAnswer = (answer, votes) => {
     return Object.entries(votes || {})
       .filter(([voter, vote]) => vote === answer)
       .map(([voter]) => voter);
   };
 
-  // Game code display component for all phases except menu and lobby
   const GameCodeDisplay = () => {
     if (gameState === "menu" || gameState === "lobby") return null;
-
     return <div className="floating-game-code">Spillkode: {gameCode}</div>;
   };
 
@@ -354,6 +460,24 @@ export default function TriviaBluffGame() {
                   }`}
                 >
                   {emoji}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* New: Max guesses selection */}
+          <div className="guess-settings">
+            <p className="guess-title">Maks antall gjett per spørsmål</p>
+            <div className="guess-options">
+              {[1, 2, 3, 4, 5].map((num) => (
+                <button
+                  key={num}
+                  onClick={() => setMaxGuesses(num)}
+                  className={`guess-option ${
+                    maxGuesses === num ? "selected" : ""
+                  }`}
+                >
+                  {num}
                 </button>
               ))}
             </div>
@@ -392,6 +516,12 @@ export default function TriviaBluffGame() {
             <p className="game-code">{gameCode}</p>
           </div>
 
+          <div className="game-settings-display">
+            <p className="settings-text">
+              Maks {gameData?.maxGuesses || 3} gjett per spørsmål
+            </p>
+          </div>
+
           <div className="players-section">
             <h3 className="players-title">Spillere ({players.length})</h3>
             {players.map((player) => (
@@ -426,10 +556,8 @@ export default function TriviaBluffGame() {
     );
   }
 
-  // New question preview state - only visible to host
   if (gameState === "questionPreview") {
     if (!isHost) {
-      // Non-host players see a waiting screen
       return (
         <div className="game-container">
           <GameCodeDisplay />
@@ -443,7 +571,6 @@ export default function TriviaBluffGame() {
       );
     }
 
-    // Host sees the question preview
     return (
       <div className="game-container">
         <GameCodeDisplay />
@@ -455,7 +582,6 @@ export default function TriviaBluffGame() {
             <div className="preview-question">
               <h3 className="question-text">{previewQuestion}</h3>
             </div>
-
             <div className="preview-answer">
               <p className="answer-label">Riktig svar:</p>
               <p className="correct-answer-preview">
@@ -483,12 +609,14 @@ export default function TriviaBluffGame() {
 
   if (gameState === "question") {
     const answeredCount = gameData?.answers
-      ? Object.keys(gameData.answers).length
+      ? getPlayersWhoAnswered(gameData.answers).length
       : 0;
     const totalPlayers = gameData?.players
       ? Object.keys(gameData.players).length
       : 0;
     const allAnswered = answeredCount === totalPlayers;
+    const playerGuesses = gameData?.playerGuessCount?.[playerName] || 0;
+    const remainingGuesses = (gameData?.maxGuesses || 3) - playerGuesses;
 
     return (
       <div className="game-container">
@@ -508,9 +636,23 @@ export default function TriviaBluffGame() {
 
           {!hasAnswered ? (
             <>
+              <div className="guess-counter">
+                <p className="guess-text">
+                  Gjenstående forsøk: {remainingGuesses} av{" "}
+                  {gameData?.maxGuesses || 3}
+                </p>
+              </div>
+
               <div className="answer-section">
                 <p className="instruction-text">
-                  Lag et overbevisende luresvar som kan lure andre spillere
+                  Lag overbevisende luresvar som kan lure andre spillere
+                  {(gameData?.maxGuesses || 3) > 1 && (
+                    <span className="multiple-answers-hint">
+                      {" "}
+                      (Du kan lage {gameData?.maxGuesses || 3} forskjellige
+                      svar!)
+                    </span>
+                  )}
                 </p>
                 <input
                   type="text"
@@ -521,8 +663,12 @@ export default function TriviaBluffGame() {
                 />
               </div>
 
-              <button onClick={submitAnswer} className="btn btn-warning">
-                Send Inn Svar
+              <button
+                onClick={submitAnswer}
+                className="btn btn-warning"
+                disabled={remainingGuesses <= 0}
+              >
+                {remainingGuesses > 0 ? "Send Inn Svar" : "Ingen forsøk igjen"}
               </button>
             </>
           ) : (
@@ -545,10 +691,19 @@ export default function TriviaBluffGame() {
 
   if (gameState === "voting") {
     const answers = gameData?.answers ? Object.values(gameData.answers) : [];
+    const uniqueAnswers = getUniqueAnswers(answers);
     const correctAnswer = { answer: gameData?.correctAnswer, isCorrect: true };
-    const allAnswers = [...answers, correctAnswer].sort(
+    const allAnswers = [...uniqueAnswers, correctAnswer].sort(
       () => Math.random() - 0.5
     );
+
+    const totalPlayers = gameData?.players
+      ? Object.keys(gameData.players).length
+      : 0;
+    const votedPlayers = gameData?.votes
+      ? Object.keys(gameData.votes).length
+      : 0;
+    const allVoted = totalPlayers > 0 && votedPlayers === totalPlayers;
 
     return (
       <div className="game-container">
@@ -596,9 +751,17 @@ export default function TriviaBluffGame() {
               <p className="status-text">
                 Venter på at andre spillere stemmer...
               </p>
-              <p className="status-text">
-                Resultater vises automatisk når alle har stemt.
-              </p>
+              {isHost && allVoted && (
+                <>
+                  <p className="status-text">Alle har stemt!</p>
+                  <button
+                    onClick={proceedToResults}
+                    className="btn btn-success"
+                  >
+                    Vis Resultater
+                  </button>
+                </>
+              )}
             </div>
           )}
         </div>
@@ -608,8 +771,9 @@ export default function TriviaBluffGame() {
 
   if (gameState === "results") {
     const answers = gameData?.answers ? Object.values(gameData.answers) : [];
+    const uniqueAnswers = getUniqueAnswers(answers);
     const correctAnswer = { answer: gameData?.correctAnswer, isCorrect: true };
-    const allAnswers = [...answers, correctAnswer];
+    const allAnswers = [...uniqueAnswers, correctAnswer];
     const myVote = gameData?.votes?.[playerName];
     const votes = gameData?.votes || {};
 
@@ -625,6 +789,9 @@ export default function TriviaBluffGame() {
               const voters = getVotersForAnswer(answer.answer, votes);
               const isCorrect = answer.isCorrect;
               const wasMyVote = myVote === answer.answer;
+              const allPlayersWhoAnswered = isCorrect
+                ? []
+                : getPlayersForAnswer(answer.answer, gameData?.answers || {});
 
               return (
                 <div
@@ -637,7 +804,11 @@ export default function TriviaBluffGame() {
                     <div className="result-main">
                       <span className="result-answer">{answer.answer}</span>
                       <span className="result-author">
-                        {isCorrect ? "Riktig svar" : `av ${answer.player}`}
+                        {isCorrect
+                          ? "Riktig svar"
+                          : allPlayersWhoAnswered.length > 1
+                          ? `av ${allPlayersWhoAnswered.join(", ")}`
+                          : `av ${answer.player}`}
                       </span>
                     </div>
                     {voters.length > 0 && (
@@ -659,9 +830,17 @@ export default function TriviaBluffGame() {
           </div>
 
           {isHost && (
-            <button onClick={proceedToRankings} className="btn btn-success">
-              Vis Poengtavle
-            </button>
+            <div className="host-actions">
+              <button
+                onClick={proceedToManualScoring}
+                className="btn btn-warning"
+              >
+                Gi ekstra poeng
+              </button>
+              <button onClick={proceedToRankings} className="btn btn-success">
+                Vis Poengtavle
+              </button>
+            </div>
           )}
 
           {!isHost && (
@@ -669,6 +848,75 @@ export default function TriviaBluffGame() {
               <p>Venter på at verten fortsetter...</p>
             </div>
           )}
+        </div>
+      </div>
+    );
+  }
+
+  if (gameState === "manualScoring") {
+    const players = gameData?.players ? Object.values(gameData.players) : [];
+    const answers = gameData?.answers ? Object.values(gameData.answers) : [];
+    const uniqueAnswers = getUniqueAnswers(answers);
+
+    if (!isHost) {
+      return (
+        <div className="game-container">
+          <GameCodeDisplay />
+          <div className="game-card">
+            <h2 className="section-title">Venter på poengfordeling</h2>
+            <p className="waiting-text">Verten gir ut ekstra poeng...</p>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="game-container">
+        <GameCodeDisplay />
+        <div className="game-card extra-wide">
+          <h2 className="section-title">Gi ekstra poeng</h2>
+          <p className="instruction-text">
+            Klikk på svarene du mener var riktige for å gi poeng til spillerne
+          </p>
+
+          <div className="manual-scoring-section">
+            <h4 className="manual-scoring-title">Spillernes svar:</h4>
+            <div className="manual-answers-list">
+              {uniqueAnswers.map((answer, i) => {
+                const allPlayersWhoAnswered = getPlayersForAnswer(
+                  answer.answer,
+                  gameData?.answers || {}
+                );
+                return (
+                  <div key={i} className="manual-answer-item">
+                    <div className="manual-answer-content">
+                      <span className="manual-answer-text">
+                        {answer.answer}
+                      </span>
+                      <span className="manual-answer-players">
+                        av {allPlayersWhoAnswered.join(", ")}
+                      </span>
+                    </div>
+                    <div className="manual-answer-actions">
+                      {allPlayersWhoAnswered.map((playerName) => (
+                        <button
+                          key={playerName}
+                          onClick={() => awardPointsToPlayer(playerName, 2)}
+                          className="btn btn-small btn-success"
+                        >
+                          Gi 2p til {playerName}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <button onClick={proceedToRankings} className="btn btn-primary">
+            Ferdig - Vis poengtavle
+          </button>
         </div>
       </div>
     );
@@ -704,9 +952,12 @@ export default function TriviaBluffGame() {
           </div>
 
           {isHost && (
-            <button onClick={nextRound} className="btn btn-success">
-              Neste Runde
-            </button>
+            <>
+              <p className="status-text">Alle spillere har fullført runden!</p>
+              <button onClick={nextRound} className="btn btn-success">
+                Neste Runde
+              </button>
+            </>
           )}
 
           {!isHost && (
